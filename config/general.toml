@@ -1,0 +1,46 @@
+[AO]
+channels = [ # the channels to query
+  10272, # first box contact 1
+  10273,
+  10274,
+  10275,
+  10276,
+  10277,
+  10278,
+  10279,
+  10280, # first box contact 9
+  10281,
+  10282,
+  10283,
+  10284,
+  10285,
+  10286,
+  10287,
+  10288, # second box contact 1
+  10289,
+  10290,
+  10291,
+  10292,
+  10293,
+  10294,
+  10295,
+]
+refresh_rate_ms = 10 # defines a sleep in the main loop --> note that this will lead to error code 8 if it is faster than 15ms for the return of GetAlignedData (error for empty it seems)
+buffer_size_ms = 100000
+ao_mac = [
+  0x6c,
+  0xec,
+  0xeb,
+  0xff,
+  0xeb,
+  0x18,
+] # the mac address can be read of the sticker below the Neuro Omega (where the ethernet adapter is located)
+[LSL]
+sampling_rate_hz = 22000             # will be used as nominal sampling rate in the LSL stream
+out_lsl_stream_name = 'AODataStream'
+max_buffer_size_s = 100              # LSL default is 360, but 100 should be sufficient
+
+[Server]
+ip = "127.0.0.1"
+port = 8081
+sleep_ms = 100   # sleep in the server loop
