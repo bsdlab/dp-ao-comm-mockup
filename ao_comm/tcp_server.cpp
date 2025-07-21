@@ -1,44 +1,70 @@
-#include <Ws2tcpip.h>
-#include <ao_comm/tcp_server.hpp>
-#include <ao_comm_deps/AO/include/EthernetStandAlone.h>
+// These would be required for using the actual AO API
+// #include <ao_comm/tcp_server.hpp>
+// #include <ao_comm_deps/AO/include/EthernetStandAlone.h>
 #include <chrono>
 #include <cstring>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#define SOCKET_TYPE SOCKET
+#define CLOSE_SOCKET closesocket
+#define INVALID_SOCKET_VAL INVALID_SOCKET
+#define SOCKET_ERROR_VAL SOCKET_ERROR
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#define SOCKET_TYPE int
+#define CLOSE_SOCKET close
+#define INVALID_SOCKET_VAL -1
+#define SOCKET_ERROR_VAL -1
+#endif
+
 //_____________________________________________________________________________
+
 class Receiver {
 public:
   Receiver(const char *ip_addr, int port);
   ~Receiver();
   std::tuple<char *, int> ReceiveMessage();
+  void Close();
 
 private:
-  int _recvSocket;
-  int _sendSocket;
+  SOCKET_TYPE _recvSocket;
+  SOCKET_TYPE _sendSocket;
 
   std::tuple<char *, int> processCommand(char *message);
-  void Close();
 };
 
 Receiver::Receiver(const char *ip_addr, int port) {
-  // Windows only application
-  // Initialize Winsock
+#ifdef _WIN32
+  // Initialize Winsock on Windows
   WSADATA wsaData;
   int wsaInitResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
   if (wsaInitResult != 0) {
     std::cerr << "WSAStartup failed: " << wsaInitResult << std::endl;
     return;
   }
+#endif
 
-  // Create receiver socket
+  // Create receiver socket (same for all platforms)
   _recvSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (_recvSocket == INVALID_SOCKET) {
+  if (_recvSocket == INVALID_SOCKET_VAL) {
+#ifdef _WIN32
     std::cerr << "Error creating socket: " << WSAGetLastError() << std::endl;
     WSACleanup();
+#else
+    std::cerr << "Error creating socket: " << strerror(errno) << std::endl;
+#endif
     return;
   }
 
@@ -46,63 +72,117 @@ Receiver::Receiver(const char *ip_addr, int port) {
   recv_addr.sin_family = AF_INET;
   recv_addr.sin_port = htons(port);
 
-  // Convert IP address from string to in_addr structure
-  inet_pton(AF_INET, ip_addr, &recv_addr.sin_addr);
+  // Convert IP address from string to binary
+  if (inet_pton(AF_INET, ip_addr, &recv_addr.sin_addr) <= 0) {
+    std::cerr << "Invalid IP address" << std::endl;
+    CLOSE_SOCKET(_recvSocket);
+#ifdef _WIN32
+    WSACleanup();
+#endif
+    return;
+  }
 
   // Bind to socket
-  if (bind(_recvSocket, (SOCKADDR *)&recv_addr, sizeof(recv_addr)) ==
-      SOCKET_ERROR) {
+  if (bind(_recvSocket, (struct sockaddr *)&recv_addr, sizeof(recv_addr)) ==
+      SOCKET_ERROR_VAL) {
+#ifdef _WIN32
     std::cerr << "Bind failed: " << WSAGetLastError() << std::endl;
-    closesocket(_recvSocket);
     WSACleanup();
+#else
+    std::cerr << "Bind failed: " << strerror(errno) << std::endl;
+#endif
+    CLOSE_SOCKET(_recvSocket);
     return;
   }
 
   // Listen on socket
-  if (listen(_recvSocket, 1) == SOCKET_ERROR) {
+  if (listen(_recvSocket, 1) == SOCKET_ERROR_VAL) {
+#ifdef _WIN32
     std::cerr << "Listen failed: " << WSAGetLastError() << std::endl;
-    closesocket(_recvSocket);
     WSACleanup();
+#else
+    std::cerr << "Listen failed: " << strerror(errno) << std::endl;
+#endif
+    CLOSE_SOCKET(_recvSocket);
     return;
   }
 
-  // Accept first sending client
+  // Accept incoming connection
   std::cout << "Waiting for incoming connection..." << std::endl;
   _sendSocket = accept(_recvSocket, NULL, NULL);
-  if (_sendSocket == INVALID_SOCKET) {
+  if (_sendSocket == INVALID_SOCKET_VAL) {
+#ifdef _WIN32
     std::cerr << "Accept failed: " << WSAGetLastError() << std::endl;
-    closesocket(_recvSocket);
     WSACleanup();
+#else
+    std::cerr << "Accept failed: " << strerror(errno) << std::endl;
+#endif
+    CLOSE_SOCKET(_recvSocket);
     return;
   }
 
   std::cout << "Connection established!" << std::endl;
 }
+
 Receiver::~Receiver() {
-  closesocket(_sendSocket);
-  closesocket(_recvSocket);
+  CLOSE_SOCKET(_sendSocket);
+  CLOSE_SOCKET(_recvSocket);
+#ifdef _WIN32
   WSACleanup();
+#endif
 }
+
+// class Receiver {
+// public:
+//   Receiver(const char *ip_addr, int port);
+//   ~Receiver();
+//   std::tuple<char *, int> ReceiveMessage();
+//
+// private:
+//   int _recvSocket;
+//   int _sendSocket;
+//
+//   std::tuple<char *, int> processCommand(char *message);
+//   void Close();
+// };
 
 //_____________________________________________________________________________
 std::tuple<char *, int> Receiver::ReceiveMessage() {
-  // Receive data
-  char response[256];
-  int dataSize;
-
-  dataSize = recv(_sendSocket, response, sizeof(response), 0);
-
-  // In case of -1 return, we did not receive a message
-  if (dataSize == -1) {
-    response[0] = 0;
-
-  } else {
-    response[dataSize] = 0; // do null termination
+  char buffer[1024];
+  int bytesReceived = recv(_sendSocket, buffer, sizeof(buffer), 0);
+  if (bytesReceived == SOCKET_ERROR_VAL) {
+#ifdef _WIN32
+    std::cerr << "Receive failed: " << WSAGetLastError() << std::endl;
+#else
+    std::cerr << "Receive failed: " << strerror(errno) << std::endl;
+#endif
+    return std::make_tuple(nullptr, 0);
   }
 
-  return processCommand(response);
+  // In case of -1 return, we did not receive a message
+  if (bytesReceived == -1) {
+    buffer[0] = 0;
+
+  } else {
+    buffer[bytesReceived] = 0; // do null termination
+  }
+
+  return processCommand(buffer);
 }
-void Receiver::Close() { closesocket(_recvSocket); }
+
+void Receiver::Close() {
+  if (_recvSocket != INVALID_SOCKET_VAL) {
+    CLOSE_SOCKET(_recvSocket);
+    _recvSocket = INVALID_SOCKET_VAL; // Mark as closed
+  }
+  if (_sendSocket != INVALID_SOCKET_VAL) {
+    CLOSE_SOCKET(_sendSocket);
+    _sendSocket = INVALID_SOCKET_VAL; // Mark as closed
+  }
+#ifdef _WIN32
+  WSACleanup(); // Only needed on Windows
+#endif
+}
 
 //_____________________________________________________________________________
 std::tuple<char *, int> Receiver::processCommand(char *message) {
@@ -140,7 +220,16 @@ std::tuple<char *, int> Receiver::processCommand(char *message) {
   // message :/
   size_t mLen = strlen(message) + 1;
   char *deepcopy_msg = new char[mLen];
+
+  // only Windows version for actual app
+#ifdef _WIN32
+  // Windows secure version
   strcpy_s(deepcopy_msg, mLen, message);
+#else
+  // Unix-style with manual null-termination
+  strncpy(deepcopy_msg, message, mLen - 1);
+  deepcopy_msg[mLen - 1] = '\0';
+#endif
 
   std::cout << "Received message: " << message << std::endl;
 
@@ -180,10 +269,10 @@ std::tuple<char *, int> Receiver::processCommand(char *message) {
   // Call function on AO with corresponding parameters
   if (functionName == "STARTREC") {
     std::cout << "Calling function StartSave" << std::endl;
-    errorCode = StartSave(); // start saving on AO
+    // errorCode = StartSave(); // start saving on AO
   } else if (functionName == "STOPREC") {
     std::cout << "Calling function StopSave" << std::endl;
-    errorCode = StopSave(); // stop saving on AO
+    // errorCode = StopSave(); // stop saving on AO
   } else if (functionName == "STARTSTIM") {
     // TODO: Implement proper json parson for incomming messages -> like this we
     // rely on the order
@@ -214,10 +303,10 @@ std::tuple<char *, int> Receiver::processCommand(char *message) {
       std::cout << "\tFreq_hZ: " << Freq_hZ << std::endl;
       std::cout << "\tDuration_sec: " << Duration_sec << std::endl;
       std::cout << "\tReturnChannel: " << ReturnChannel << std::endl;
-      errorCode = StartDigitalStimulation(
-          StimChannel, FirstPhaseDelay_mS, FirstPhaseAmpl_mA,
-          FirstPhaseWidth_mS, SecondPhaseDelay_mS, SecondPhaseAmpl_mA,
-          SecondPhaseWidth_mS, Freq_hZ, Duration_sec, ReturnChannel);
+      // errorCode = StartDigitalStimulation(
+      // StimChannel, FirstPhaseDelay_mS, FirstPhaseAmpl_mA,
+      // FirstPhaseWidth_mS, SecondPhaseDelay_mS, SecondPhaseAmpl_mA,
+      // SecondPhaseWidth_mS, Freq_hZ, Duration_sec, ReturnChannel);
     } catch (const std::out_of_range &e) {
       std::cout << "Not enough parameters were given for function: STARTSTIM"
                 << std::endl;
@@ -242,7 +331,7 @@ std::tuple<char *, int> Receiver::processCommand(char *message) {
           << "Calling function StopStimulation with the following parameter:"
           << std::endl;
       std::cout << "\tStimChannel: " << StimChannel << std::endl;
-      errorCode = StopStimulation(StimChannel);
+      // errorCode = StopStimulation(StimChannel);
     } catch (const std::out_of_range &e) {
       std::cout << "Not enough parameters were given for function: STOPSTIM"
                 << std::endl;
@@ -260,7 +349,7 @@ std::tuple<char *, int> Receiver::processCommand(char *message) {
     std::cout << "Calling function SetSavePath with the following parameter:"
               << std::endl;
     std::cout << "\tPath: " << path << std::endl;
-    errorCode = SetSavePath(path, 50);
+    // errorCode = SetSavePath(path, 50);
   } else if (functionName == "SETSAVENAME") {
     char *path = &parameters.at(1)[0]; // Convert to char*
 
@@ -268,7 +357,11 @@ std::tuple<char *, int> Receiver::processCommand(char *message) {
         << "Calling function SetSaveFileName with the following parameter:"
         << std::endl;
     std::cout << "\tFileName: " << path << std::endl;
-    errorCode = SetSaveFileName(path, 30);
+    // errorCode = SetSaveFileName(path, 30);
+  } else if (functionName == "QUIT") {
+    std::cout << "Quitting the server" << std::endl;
+    errorCode = -2;
+    // errorCode = SetSaveFileName(path, 30);
   } else {
     std::cout << "Function " << functionName << " is not available!"
               << std::endl;
@@ -293,6 +386,12 @@ void run_server(const char *ip_addr, int port, std::atomic_bool &stop_thread,
 
     if (errorCode == 0 && !message.empty()) {
       std::cout << "Function call was successful" << std::endl;
+    } else if (errorCode == -2 &&
+               !message.empty()) { // TODO: attach the stop_thread event to the
+                                   // Receiver, so that parsing the message can
+                                   // stop directly
+      stop_thread = true;
+      _messageReceiver.Close();
     } else if (errorCode != 0 && !message.empty()) {
       std::cout << "Function call was not successful" << std::endl;
       std::cout << "Error code: " << errorCode << std::endl;
@@ -302,4 +401,5 @@ void run_server(const char *ip_addr, int port, std::atomic_bool &stop_thread,
     std::chrono::seconds dura(1);
     std::this_thread::sleep_for(dura);
   }
+  std::cout << "Server is shutting down" << std::endl;
 }

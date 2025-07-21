@@ -76,10 +76,13 @@ int main(int argc, char *argv[]) {
   std::cout << "Starting to stream to LSL with " << (1000 / refresh_rate_ms)
             << "Hz intervals" << std::endl;
 
+  int warn_after_empty_calls = 10;
   stream_ao_data_to_lsl(data_lsl_outlet, channels_arr, num_channels,
-                        refresh_rate_ms, buffer_size_ao_ms, 10);
+                        std::ref(stop_thread), refresh_rate_ms,
+                        buffer_size_ao_ms, warn_after_empty_calls);
 
   // // Clean up
+  std::cout << "Joining threads" << std::endl;
   tcp_th.join();
   delete data_lsl_outlet;
 

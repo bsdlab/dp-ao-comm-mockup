@@ -25,7 +25,7 @@ channels = [ # the channels to query
   10294,
   10295,
 ]
-refresh_rate_ms = 10 # defines a sleep in the main loop --> note that this will lead to error code 8 if it is faster than 15ms for the return of GetAlignedData (error for empty it seems)
+refresh_rate_ms = 15 # defines a sleep in the main loop --> note that this will lead to error code 8 if it is faster than 15ms for the return of GetAlignedData (error for empty it seems)
 buffer_size_ms = 100000
 ao_mac = [
   0x6c,
