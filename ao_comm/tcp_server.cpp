@@ -358,7 +358,7 @@ std::tuple<char *, int> Receiver::processCommand(char *message) {
         << std::endl;
     std::cout << "\tFileName: " << path << std::endl;
     // errorCode = SetSaveFileName(path, 30);
-  } else if (functionName == "QUIT") {
+  } else if (functionName == "CLOSE") {
     std::cout << "Quitting the server" << std::endl;
     errorCode = -2;
     // errorCode = SetSaveFileName(path, 30);
