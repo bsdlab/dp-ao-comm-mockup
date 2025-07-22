@@ -39,8 +39,7 @@ build/*
 
 .idea/
 
-# Please add these libraries
-ao_comm_deps
-ao_comm_deps/*
+./ao_comm_deps/*
+!./ao_comm_deps/README.md
 
 .cache
