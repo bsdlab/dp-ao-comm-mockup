@@ -39,7 +39,7 @@ build/*
 
 .idea/
 
-./ao_comm_deps/*
-!./ao_comm_deps/README.md
+ao_comm_deps/*
+!ao_comm_deps/README.md
 
 .cache
